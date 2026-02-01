@@ -4,13 +4,12 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-// 목업: 주관사(underwriter) 필드 추가
 const ipoList = ref([
   {
-    id: 1,
+    id: 1, // corporation ID
     name: '카카오페이',
     industry: '핀테크',
-    underwriter: '삼성증권, 대신증권', // 추가됨
+    underwriter: '삼성증권, 대신증권',
     subDate: '2026.02.05 ~ 02.06',
     listDate: '2026.02.15',
     status: '청약예정',
