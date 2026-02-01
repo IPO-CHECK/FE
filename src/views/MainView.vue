@@ -1,8 +1,96 @@
 <script setup>
-import { ref } from 'vue'
+import {onMounted, onUnmounted, ref} from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 
 const router = useRouter()
+
+// 상태 관리 변수들
+// const ipoList = ref([])           // 데이터 담을 곳
+const isLoading = ref(true)       // 로딩 중인지 여부
+const isError = ref(false)        // 에러 발생 여부
+
+// 무한 스크롤용 변수
+const page = ref(0)        // 현재 페이지 (0부터 시작한다고 가정)
+const size = ref(10)       // 한 번에 가져올 개수
+const isLastPage = ref(false) // 더 이상 데이터가 없는지 확인
+const sentinel = ref(null) // 바닥 감지용 DOM 요소 (ref="sentinel")
+let observer = null        // IntersectionObserver 인스턴스
+
+const API_BASE_URL = 'http://localhost:8080/api'
+
+// --- 데이터 가져오기 함수 ---
+// const fetchIpoList = async () => {
+//   // 1. 이미 로딩 중이거나, 마지막 페이지에 도달했다면 요청하지 않음 (방어 코드)
+//   if (isLoading.value || isLastPage.value) return
+//
+//   try {
+//     isLoading.value = true
+//     isError.value = false
+//
+//     // 2. 백엔드 요청 (GET /api/list?page=0&size=10)
+//     const response = await axios.get(`${API_BASE_URL}/list`, {
+//       params: {
+//         page: page.value,
+//         size: size.value
+//       }
+//     })
+//
+//     // 3. 응답 데이터 분해 (백엔드가 Page 객체로 준다고 가정)
+//     // content: 실제 데이터 배열
+//     // last: 마지막 페이지 여부 (boolean)
+//     const { content, last } = response.data
+//
+//     if (content && content.length > 0) {
+//       // 4. 기존 리스트 뒤에 새 데이터 이어 붙이기
+//       ipoList.value.push(...content)
+//
+//       // 5. 다음 요청을 위해 페이지 번호 1 증가
+//       page.value++
+//     }
+//
+//     // 6. 마지막 페이지인지 확인 (백엔드에서 알려준 last 값 사용)
+//     if (last) {
+//       isLastPage.value = true
+//     }
+//
+//   } catch (error) {
+//     console.error('데이터 로딩 실패:', error)
+//     isError.value = true
+//   } finally {
+//     // 7. 로딩 상태 해제
+//     isLoading.value = false
+//   }
+// }
+
+// // --- 무한 스크롤 옵저버 설정 ---
+// onMounted(() => {
+//   // 1. 초기 데이터 로드
+//   fetchIpoList()
+//
+//   // 2. 옵저버 생성
+//   observer = new IntersectionObserver((entries) => {
+//     // 바닥 감지 요소(sentinel)가 화면에 들어왔고(isIntersecting), 데이터가 더 있다면
+//     if (entries[0].isIntersecting && !isLastPage.value) {
+//       fetchIpoList()
+//     }
+//   }, {
+//     root: null,      // 브라우저 뷰포트 기준
+//     threshold: 0.1   // 10%만 보여도 콜백 실행
+//   })
+//
+//   // 3. 감시 시작
+//   if (sentinel.value) {
+//     observer.observe(sentinel.value)
+//   }
+// })
+//
+// // 컴포넌트가 사라질 때 옵저버 해제 (메모리 누수 방지)
+// onUnmounted(() => {
+//   if (observer && sentinel.value) {
+//     observer.unobserve(sentinel.value)
+//   }
+// })
 
 const ipoList = ref([
   {
@@ -216,6 +304,9 @@ function goSearch() {
           </div>
         </li>
       </ul>
+      <div ref="sentinel" class="h-4 w-full flex justify-center items-center mt-4">
+        <div v-if="isLoading" class="text-sm text-toss-grayText">불러오는 중...</div>
+      </div>
     </main>
   </div>
 </template>
