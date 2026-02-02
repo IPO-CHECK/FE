@@ -125,9 +125,45 @@ const dummyData = {
       }
     },
     valuation: {
-      conservative: { label: '보수적 시나리오', price: '20,000원', gap: '-23%', basis: '시장 침체 및 규제 강화를 가정한 보수적 접근입니다.', per: '15.0배', netIncome: '800억 원', shares: '5,000만 주', formula: '(800억 × 15배) / 5,000만 주 = 24,000원' },
-      standard: { label: '시장표준 시나리오', price: '20,000원', gap: '+33%', basis: '유사 기업 평균 PER 20배를 적용한 가장 합리적인 목표가입니다.', per: '20.0배', netIncome: '1,000억 원', shares: '5,000만 주', formula: '(1,000억 × 20배) / 5,000만 주 = 20,000원' },
-      aggressive: { label: '공격적 시나리오', price: '32,000원', gap: '+23%', basis: '신사업 확장 및 시장 호황을 가정한 공격적 접근입니다.', per: '25.0배', netIncome: '1,200억 원', shares: '5,000만 주', formula: '(1,200억 × 25배) / 5,000만 주 = 32,000원' }
+      conservative: {
+        label: '보수적 시나리오',
+        modelName: '벤저민 그레이엄 모델',
+        price: '75,000원',
+        gap: '+25%',
+        desc: '미래 성장을 배제하고, 현재 확정된 실적과 자산 가치를 기준으로 계산합니다.',
+        formula: '√(22.5 × 5,000 × 50,000) = 75,000원',
+        items: [
+          { name: '적정 PER×PBR (상수)', value: '22.5' },
+          { name: '최근 EPS', value: '5,000 원' },
+          { name: '최근 BPS', value: '50,000 원' }
+        ]
+      },
+      standard: {
+        label: '시장표준 시나리오',
+        modelName: "아스워스 다모다란의 '상대가치 평가'",
+        price: '20,000원',
+        gap: '+33%',
+        desc: '유사 기업들의 평균 PER 20.0배를 적용한 가장 합리적인 목표가입니다.',
+        formula: '(1,000억 × 20.0) / 5,000만 = 20,000원',
+        items: [
+          { name: '평균 유사 기업 PER', value: '20.0배' },
+          { name: '예상 당기순이익', value: '1,000억 원' },
+          { name: '발행 주식 총수', value: '5,000만 주' }
+        ]
+      },
+      aggressive: {
+        label: '공격적 시나리오',
+        modelName: '피터 린치의 PEG 모델',
+        price: '90,000원',
+        gap: '+50%',
+        desc: '이익의 성장 속도에 프리미엄을 부여하여 최대 상승 잠재력을 산출합니다.',
+        formula: '(30.0 × 1.0) × 3,000 = 90,000원',
+        items: [
+          { name: '연평균 성장률(G)', value: '30.0%' },
+          { name: 'PEG 적용값', value: '1.0' },
+          { name: '최근 EPS', value: '3,000 원' }
+        ]
+      }
     },
     riskReport: {
       grade: "CAUTION", // 'SAFE' | 'CAUTION' | 'DANGER' (등급)
@@ -590,48 +626,37 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
 
           <div>
-            <h3 class="text-[15px] font-bold text-[#333D4B] mb-1">
-              {{ company.valuation[selectedValuationScenario].label }}
+            <h3 class="text-[15px] font-bold text-[#191F28] mb-1">
+              {{ company.valuation[selectedValuationScenario].label }}: {{ company.valuation[selectedValuationScenario].modelName }}
             </h3>
-            <p class="text-[13px] text-[#8B95A1] mb-4">
-              {{ company.valuation[selectedValuationScenario].basis }}
+            <p class="text-[13px] text-[#4E5968] mb-4 break-keep leading-relaxed">
+              {{ company.valuation[selectedValuationScenario].desc }}
             </p>
 
             <div class="flex items-end gap-2 mb-6">
-              <span class="text-[32px] font-bold text-[#333D4B] leading-none">
-                {{ company.valuation[selectedValuationScenario].price }}
-              </span>
-              <span class="text-[14px] font-bold mb-1"
+      <span class="text-[32px] font-bold text-[#191F28] leading-none tracking-tight">
+        {{ company.valuation[selectedValuationScenario].price }}
+      </span>
+              <span class="text-[15px] font-bold mb-1"
                     :class="company.valuation[selectedValuationScenario].gap.includes('+') ? 'text-[#EF4444]' : 'text-[#3182F6]'">
-                {{ company.valuation[selectedValuationScenario].gap }}
-              </span>
+        {{ company.valuation[selectedValuationScenario].gap }}
+      </span>
             </div>
 
             <div class="bg-[#F9FAFB] rounded-[16px] p-5 border border-[#F2F4F6]">
-              <div class="space-y-3 text-[13px]">
-                <div class="flex justify-between">
-                  <span class="text-[#8B95A1]">적용 멀티플</span>
-                  <span class="font-bold text-[#333D4B]">{{ company.valuation[selectedValuationScenario].per }}</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-[#8B95A1]">26년 예상 순이익</span>
-                  <span class="font-bold text-[#333D4B]">{{
-                      company.valuation[selectedValuationScenario].netIncome
-                    }}</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-[#8B95A1]">주식 수</span>
-                  <span class="font-bold text-[#333D4B]">{{
-                      company.valuation[selectedValuationScenario].shares
-                    }}</span>
+              <div class="space-y-3">
+                <div v-for="(item, idx) in company.valuation[selectedValuationScenario].items" :key="idx"
+                     class="flex justify-between items-center text-[13px]">
+                  <span class="text-[#8B95A1] font-medium">{{ item.name }}</span>
+                  <span class="font-bold text-[#333D4B]">{{ item.value }}</span>
                 </div>
               </div>
 
-              <div class="mt-4 pt-3 border-t border-[#E5E8EB]">
-                <p class="text-[11px] text-[#8B95A1] mb-1">산출 공식</p>
-                <p class="text-[12px] font-medium text-[#4E5968] bg-white px-3 py-2 rounded-[8px] border border-[#F2F4F6] inline-block">
+              <div class="mt-4 pt-4 border-t border-[#E5E8EB]">
+                <p class="text-[11px] text-[#8B95A1] mb-2 font-medium">산출 공식</p>
+                <div class="text-[13px] font-medium text-[#4E5968] bg-white px-3 py-2.5 rounded-[10px] border border-[#F2F4F6] w-full text-center">
                   {{ company.valuation[selectedValuationScenario].formula }}
-                </p>
+                </div>
               </div>
             </div>
           </div>
