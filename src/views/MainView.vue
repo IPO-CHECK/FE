@@ -151,12 +151,20 @@ function goDetail(id) {
             <div class="flex-1 min-w-0 pr-2">
               <div class="flex items-center gap-2 mb-1">
                 <h2 class="font-bold text-gray-900 text-lg truncate leading-tight">{{ ipo.corpName }}</h2>
+
+                <span
+                    v-if="ipo.market"
+                    class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 tracking-tight shrink-0"
+                >
+          {{ ipo.market }}
+        </span>
+
                 <span
                     v-if="ipo.status && ipo.status.includes('청약')"
                     class="bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide shrink-0"
                 >
-                  NEW
-                </span>
+          NEW
+        </span>
               </div>
 
               <p class="text-xs text-gray-500 mb-3">{{ ipo.industry || '업종 미정' }}</p>
@@ -178,16 +186,16 @@ function goDetail(id) {
             </div>
 
             <div class="flex flex-col items-end gap-1.5 ml-2 mt-0.5 shrink-0">
-              <span
-                  class="px-2.5 py-1 rounded-md text-xs font-bold w-fit whitespace-nowrap"
-                  :class="getStatusStyle(ipo.status)"
-              >
-                {{ ipo.status }}
-              </span>
+      <span
+          class="px-2.5 py-1 rounded-md text-xs font-bold w-fit whitespace-nowrap"
+          :class="getStatusStyle(ipo.status)"
+      >
+        {{ ipo.status }}
+      </span>
               <div class="flex items-center gap-1 mt-1">
-                <span v-if="ipo.price && ipo.price !== '-'" class="text-sm font-bold text-gray-900">
-                  {{ ipo.price }}
-                </span>
+        <span v-if="ipo.price && ipo.price !== '-'" class="text-sm font-bold text-gray-900">
+          {{ ipo.price }}
+        </span>
                 <span class="text-gray-300 text-lg leading-none">›</span>
               </div>
             </div>
