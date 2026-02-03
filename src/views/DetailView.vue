@@ -3,39 +3,35 @@ import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import axios from 'axios'
-// api import 경로가 맞는지 확인 필요 (예: '@/api')
-import { getUpcomingIpo, getUpcomingIpoRiskAnalysis } from '../api'
+// API 경로 확인 필요
+import { getUpcomingIpoRiskAnalysis } from '../api'
 
 const route = useRoute()
 const router = useRouter()
-
-// [수정] 변수명 id로 통일
 const id = route.params.id
 
 // --- 상태 관리 ---
-const company = ref(null)         // 기업 상세 데이터
+const company = ref(null)         // 기업 상세 데이터 (기본 정보, 재무 등)
 const isLoading = ref(true)       // 로딩 상태
 const isError = ref(false)
 
-// 위험 분석 관련 상태
+// --- 위험 분석 관련 상태 (별도 API) ---
 const riskAnalysis = ref('')
 const riskLoading = ref(false)
 const riskError = ref('')
 
-// AI 분석 텍스트 파싱
+// AI 분석 텍스트 파싱 (Markdown -> 구조화된 데이터)
 const analysisSections = computed(() => {
   const text = (riskAnalysis.value || '').trim()
   if (!text) {
     return { summaryItems: [], judgmentText: '' }
   }
-  // 정규식: [핵심 투자 리스크 요약] ~ [종합 판단] 사이 추출
   const summaryMatch = text.match(/[\[【]핵심 투자 리스크 요약[\]】]\s*([\s\S]*?)(?=\n\s*[\[【]종합 판단[\]】]|$)/)
   const judgmentMatch = text.match(/[\[【]종합 판단[\]】]\s*([\s\S]*)$/)
 
   const summaryText = summaryMatch ? summaryMatch[1].trim() : ''
   const judgmentText = judgmentMatch ? judgmentMatch[1].trim() : ''
 
-  // 번호(1., 2.)로 구분하여 배열 생성
   const summaryItems = summaryText
       .split(/\n\s*\d+\.\s*/)
       .map(s => s.trim())
@@ -53,7 +49,6 @@ const analysisSections = computed(() => {
   }
 })
 
-// 텍스트 포맷팅 헬퍼
 function formatArrowBreaks(text) {
   if (!text) return ''
   return text
@@ -77,7 +72,7 @@ const API_BASE_URL = 'http://localhost:8080/api'
 
 // --- 데이터 가져오기 ---
 const fetchCompanyDetail = async (targetId) => {
-  // 1. 기업 상세 정보 로드
+  // 1. 기업 상세 정보 로드 (재무, 기본정보)
   try {
     isLoading.value = true
     isError.value = false
@@ -85,7 +80,6 @@ const fetchCompanyDetail = async (targetId) => {
     const response = await axios.get(`${API_BASE_URL}/upcoming-ipo/${targetId}/financials`)
     company.value = response.data
 
-    // 초기값 설정
     if (company.value) {
       if (company.value.deepMetrics?.[selectedDeepCategory.value]?.items?.length > 0) {
         selectedDeepMetric.value = company.value.deepMetrics[selectedDeepCategory.value].items[0].key
@@ -109,11 +103,10 @@ const fetchCompanyDetail = async (targetId) => {
     isLoading.value = false
   }
 
-  // 2. 위험 분석 데이터 로드 (별도 try-catch)
+  // 2. 위험 분석 데이터 로드 (별도 API)
   try {
     riskLoading.value = true
     riskError.value = ''
-    // [수정] id 변수 사용
     const analysis = await getUpcomingIpoRiskAnalysis(targetId)
     riskAnalysis.value = analysis?.analysisText || ''
   } catch (error) {
@@ -142,9 +135,13 @@ const renderPerfChart = () => {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
-        const val = params[0].value;
-        return `${params[0].name}<br/>
-                <span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:#3182F6;"></span>
+        const item = params[0];
+        const val = item.value;
+        // [핵심 수정] item.color를 사용하여 현재 막대 색상(파랑/빨강)을 그대로 가져옴
+        const color = item.color;
+
+        return `${item.name}<br/>
+                <span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:${color};"></span>
                 ${selectedPerfMetric.value}: <b>${val.toLocaleString()}</b> 백만원`
       }
     },
@@ -163,6 +160,7 @@ const renderPerfChart = () => {
       data: data,
       barWidth: 20,
       itemStyle: {
+        // 양수: 파랑(#3182F6), 음수: 빨강(#EF4444)
         color: (p) => p.value >= 0 ? '#3182F6' : '#EF4444',
         borderRadius: [4, 4, 4, 4]
       },
@@ -234,7 +232,6 @@ const getRiskLevelInfo = (grade) => {
 
 // --- 생명주기 ---
 onMounted(() => {
-  // [수정] id 변수 사용
   fetchCompanyDetail(id)
   window.addEventListener('resize', () => {
     perfChartInst?.resize();
@@ -438,9 +435,8 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
         </section>
 
-        <section v-if="company.riskReport" class="bg-white rounded-[24px] p-6 shadow-sm mb-10 overflow-hidden relative">
-          <div
-              class="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+        <section v-if="company.riskReport || riskLoading || riskAnalysis" class="bg-white rounded-[24px] p-6 shadow-sm mb-10 overflow-hidden relative">
+          <div class="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
 
           <h2 class="text-[19px] font-bold text-[#191F28] mb-6 flex items-center gap-2 relative z-10">
             <span class="bg-blue-100 p-1.5 rounded-lg">
@@ -453,7 +449,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
             핵심 투자 위험 분석
           </h2>
 
-          <div class="bg-gray-50 rounded-[20px] p-5 mb-5 border border-gray-100">
+          <div v-if="company.riskReport" class="bg-gray-50 rounded-[20px] p-5 mb-5 border border-gray-100">
             <div class="flex justify-between items-start mb-4">
               <div>
                 <p class="text-[13px] text-[#8B95A1] mb-1">AI 리스크 종합 진단</p>
@@ -556,7 +552,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
             </div>
           </div>
 
-          <div class="space-y-3">
+          <div v-if="company.riskReport?.aiSummary" class="space-y-3">
             <div v-for="(s, i) in company.riskReport.aiSummary" :key="i"
                  class="flex gap-3 items-start bg-white p-3 rounded-xl border border-[#F2F4F6]">
               <span class="text-[#3182F6] font-bold text-lg leading-none mt-0.5">Q.</span>
