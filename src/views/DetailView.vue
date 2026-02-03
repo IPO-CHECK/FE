@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import axios from 'axios'
 // API 경로는 vite.config.js 프록시 설정(/api)을 따릅니다.
-import { getUpcomingIpoRiskAnalysis } from '../api'
+import { getUpcomingIpoRiskAnalysis, getUpcomingIpoBusinessAnalysis } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,8 +20,8 @@ const riskAnalysis = ref('')
 const riskLoading = ref(false)
 const riskError = ref('')
 
-// --- [신규] 성장성 분석 데이터 (목업) ---
-const growthAnalysis = ref({
+// --- [신규] 성장성 분석 데이터 (API 연동, 없으면 목업 유지) ---
+const defaultGrowthAnalysis = {
   overallSummary: "2024년 매출 급증으로 기술 상업화 초기에 진입했으나, 지속적인 영업손실과 자본잠식으로 재무 리스크가 상존함. 글로벌 이중항체 시장의 고성장 수혜 기대와 PSR 51.3배의 높은 밸류에이션 부담이 공존하는 상황.",
   categories: [
     { title: "수익화 구조 (Revenue Structure)", grade: "중", reason: "매출 275억 원 발생은 긍정적이나, 일시적 기술료 성격이 강하고 영업이익 적자 전환.", gradeColor: "text-amber-600 bg-amber-50" },
@@ -29,7 +29,8 @@ const growthAnalysis = ref({
     { title: "구조적 리스크 (Structural Risk)", grade: "하", reason: "자본잠식 상태와 지속적인 현금 소진(Cash Burn)으로 재무 건전성 취약.", gradeColor: "text-red-600 bg-red-50" },
     { title: "자원 확보 (Resource Investment)", grade: "중", reason: "400억 원 공모 자금은 단기 활용 가능하나, 글로벌 경쟁 대비 추가 조달 필요.", gradeColor: "text-amber-600 bg-amber-50" }
   ]
-})
+}
+const growthAnalysis = ref({ ...defaultGrowthAnalysis })
 
 // AI 분석 텍스트 파싱
 const analysisSections = computed(() => {
@@ -131,6 +132,30 @@ const fetchCompanyDetail = async (targetId) => {
     riskAnalysis.value = ''
   } finally {
     riskLoading.value = false
+  }
+
+  // Growth Potential Evaluation (business-analysis) 로드 — 있으면 채움, 없으면 목업 유지
+  growthAnalysis.value = { ...defaultGrowthAnalysis }
+  try {
+    const data = await getUpcomingIpoBusinessAnalysis(targetId)
+    if (data?.overallSummary != null || data?.categories?.length) {
+      growthAnalysis.value = {
+        overallSummary: data.overallSummary ?? '',
+        categories: (data.categories ?? []).map(c => ({
+          title: c.title ?? '',
+          grade: c.grade ?? '중',
+          reason: c.reason ?? '',
+          gradeColor: c.gradeColor ?? 'text-amber-600 bg-amber-50'
+        }))
+      }
+    }
+  } catch (error) {
+    if (error?.message?.includes('404')) {
+      growthAnalysis.value = { ...defaultGrowthAnalysis }
+    } else {
+      console.error('Growth Potential 분석 로드 실패:', error)
+      growthAnalysis.value = { ...defaultGrowthAnalysis }
+    }
   }
 }
 

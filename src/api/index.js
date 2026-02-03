@@ -27,3 +27,18 @@ export async function getUpcomingIpoRiskAnalysis(id) {
   if (!res.ok) throw new Error(`API 오류: ${res.status}`)
   return res.json()
 }
+
+/**
+ * AI Analyst Growth Potential Evaluation (수익화·확장성·리스크·자원)
+ * @param {string|number} id - upcoming_ipo id
+ * @returns {Promise<{ overallSummary: string, categories: Array<{ title: string, grade: string, reason: string, gradeColor: string }> }>}
+ * @throws 404이면 데이터 없음 → catch 후 목업 유지
+ */
+export async function getUpcomingIpoBusinessAnalysis(id) {
+  const res = await fetch(`${BASE_URL}/upcoming-ipo/${id}/business-analysis`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`API 오류: ${res.status}`)
+  return res.json()
+}
