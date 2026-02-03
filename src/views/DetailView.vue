@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
+import { getUpcomingIpo, getUpcomingIpoRiskAnalysis } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +13,43 @@ const id = route.params.id
 const company = ref(null)         // 기업 상세 데이터
 const isLoading = ref(true)       // 로딩 상태 (테스트용)
 const isError = ref(false)
+const riskAnalysis = ref('')
+const riskLoading = ref(false)
+const riskError = ref('')
+
+const analysisSections = computed(() => {
+  const text = (riskAnalysis.value || '').trim()
+  if (!text) {
+    return { summaryItems: [], judgmentText: '' }
+  }
+  const summaryMatch = text.match(/[\[【]핵심 투자 리스크 요약[\]】]\s*([\s\S]*?)(?=\n\s*[\[【]종합 판단[\]】]|$)/)
+  const judgmentMatch = text.match(/[\[【]종합 판단[\]】]\s*([\s\S]*)$/)
+  const summaryText = summaryMatch ? summaryMatch[1].trim() : ''
+  const judgmentText = judgmentMatch ? judgmentMatch[1].trim() : ''
+
+  const summaryItems = summaryText
+    .split(/\n\s*\d+\.\s*/)
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  return {
+    summaryItems: summaryItems.map(item => {
+      const cleaned = formatArrowBreaks(item)
+      const parts = cleaned.split('\n')
+      const title = parts.shift() || ''
+      const body = parts.join('\n').trim()
+      return { title, body }
+    }),
+    judgmentText: formatArrowBreaks(judgmentText),
+  }
+})
+
+function formatArrowBreaks(text) {
+  if (!text) return ''
+  return text
+    .replace(/^\s*\d+\.\s*/, '')
+    .replace(/\s*->\s*/g, '\n→ ')
+}
 
 // --- 차트 및 필터 상태 ---
 const performanceChartRef = ref(null)
@@ -24,8 +62,6 @@ const selectedDeepCategory = ref('growth')
 const selectedDeepMetric = ref('')
 const selectedPeerId = ref(null)
 const selectedValuationScenario = ref('standard')
-
-const API_BASE_URL = 'http://localhost:8080/api'
 
 const dummyData = {
   1: {
@@ -214,17 +250,20 @@ const fetchCompanyDetail = async (corpId) => {
 }
 */
 
-// 📡 [수정] 백엔드 대신 더미 데이터를 불러오는 함수
-const fetchCompanyDetail = (corpId) => {
-  // 실제 API 호출하는 척 (로딩 스피너 확인용 0.5초 딜레이)
+const fetchCompanyDetail = async (corpId) => {
   isLoading.value = true
+  isError.value = false
 
-  setTimeout(() => {
-    // 1. 더미 데이터에서 id로 찾기 (없으면 1번 데이터 사용)
-    const data = dummyData[corpId] || dummyData[1]
-    company.value = data
+  try {
+    const upcoming = await getUpcomingIpo(corpId)
+    const base = dummyData[1]
+    company.value = {
+      ...base,
+      id: upcoming.id,
+      name: upcoming.corpName,
+      industry: upcoming.industry || base.industry,
+    }
 
-    // 2. 데이터 로드 후 초기값 설정
     if (company.value?.deepMetrics?.growth?.items?.length > 0) {
       selectedDeepMetric.value = company.value.deepMetrics.growth.items[0].key
     }
@@ -232,13 +271,27 @@ const fetchCompanyDetail = (corpId) => {
       selectedPeerId.value = company.value.peers[0].id
     }
 
-    // 3. 차트 그리기
+    await nextTick()
+    renderPerfChart()
+    renderDeepChart()
+  } catch (error) {
+    console.error('API 호출 실패:', error)
+    isError.value = true
+  } finally {
     isLoading.value = false
-    nextTick(() => {
-      renderPerfChart()
-      renderDeepChart()
-    })
-  }, 500) // 0.5초 뒤 실행
+  }
+
+  try {
+    riskLoading.value = true
+    riskError.value = ''
+    const analysis = await getUpcomingIpoRiskAnalysis(corpId)
+    riskAnalysis.value = analysis?.analysisText || ''
+  } catch (error) {
+    riskError.value = '위험 분석을 불러오지 못했습니다.'
+    riskAnalysis.value = ''
+  } finally {
+    riskLoading.value = false
+  }
 }
 
 // --- 차트 렌더링 함수 ---
@@ -702,17 +755,68 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
 
           <div class="mb-6">
-            <div class="flex items-center gap-2 mb-3">
-              <span class="text-[12px] font-bold text-[#3182F6]">AI 요약</span>
-              <div class="h-[1px] flex-1 bg-gray-100"></div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="text-[12px] font-bold text-[#3182F6]">AI 요약</span>
+                <span class="text-[10px] text-[#6B7684] bg-blue-50 px-2 py-0.5 rounded-full">내부 공시 기반</span>
+              </div>
+              <span class="text-[10px] text-[#B0B8C1]">자동 분석</span>
             </div>
-            <div class="space-y-2">
-              <div v-for="(summary, idx) in company.riskReport.aiSummary" :key="idx"
-                   class="flex gap-3 items-start group">
-                <span class="text-[#3182F6] font-serif text-[16px] leading-none mt-0.5 opacity-50 group-hover:opacity-100 transition-opacity">"</span>
-                <p class="text-[14px] text-[#333D4B] leading-relaxed font-medium">
-                  {{ summary }}
-                </p>
+
+            <div class="rounded-[18px] border border-[#E6EDF5] bg-gradient-to-b from-white to-[#F8FAFC] shadow-[0_8px_24px_rgba(0,0,0,0.04)] overflow-hidden">
+              <div class="flex items-center justify-between px-4 py-3 border-b border-[#EDF2F7] bg-white/80 backdrop-blur">
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-50 text-[#3182F6] text-[12px] font-bold">AI</span>
+                  <span class="text-[13px] font-bold text-[#191F28]">핵심 투자 위험 해석</span>
+                </div>
+                <span class="text-[10px] text-[#8B95A1]">요약·해석</span>
+              </div>
+
+              <div class="p-4">
+                <div v-if="riskLoading" class="flex items-center gap-2 text-[13px] text-[#8B95A1]">
+                  <svg class="animate-spin h-4 w-4 text-[#3182F6]" xmlns="http://www.w3.org/2000/svg" fill="none"
+                       viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  분석 생성 중...
+                </div>
+                <div v-else-if="riskError" class="text-[13px] text-[#EF4444]">
+                  {{ riskError }}
+                </div>
+                <template v-else>
+                  <div class="space-y-5">
+                    <div>
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                          <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-[#3182F6] text-[11px] font-bold">✓</span>
+                          <h4 class="text-[14px] font-bold text-[#1F2A37] font-serif">핵심 투자 리스크 요약</h4>
+                        </div>
+                        <span class="text-[10px] text-[#8B95A1]">Summary</span>
+                      </div>
+                      <ul class="space-y-2">
+                        <li v-for="(item, idx) in analysisSections.summaryItems" :key="idx"
+                            class="bg-white rounded-[12px] border border-[#EEF2F6] px-3 py-2 text-[13px] md:text-[14px] text-[#333D4B] leading-6 whitespace-pre-wrap">
+                          <div class="flex items-start gap-2">
+                            <span class="text-[#3182F6] font-extrabold text-[14px] md:text-[15px] mt-[1px]">{{ idx + 1 }}.</span>
+                            <div>
+                              <p class="text-[14px] md:text-[15px] font-bold text-[#1F2A37] leading-6">{{ item.title }}</p>
+                              <p v-if="item.body" class="text-[13px] md:text-[14px] text-[#4B5563] leading-6 whitespace-pre-wrap">{{ item.body }}</p>
+                            </div>
+                          </div>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h4 class="text-[13px] font-bold text-[#111827] font-mono mb-2">종합 판단</h4>
+                      <p class="text-[13px] md:text-[14px] text-[#374151] leading-7 tracking-[-0.2px] whitespace-pre-wrap font-sans">
+                        {{ analysisSections.judgmentText }}
+                      </p>
+                    </div>
+                  </div>
+                </template>
               </div>
             </div>
           </div>
