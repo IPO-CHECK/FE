@@ -3,68 +3,47 @@ import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import axios from 'axios'
-// API 경로는 vite.config.js 프록시 설정(/api)을 따릅니다.
 import { getUpcomingIpoRiskAnalysis, getUpcomingIpoBusinessAnalysis } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id
+const API_BASE_URL = '/api'
 
 // --- 상태 관리 ---
-const company = ref(null)         // 기업 상세 데이터
-const isLoading = ref(true)       // 전체 페이지 로딩 상태
+const company = ref(null)
+const isLoading = ref(true)
 const isError = ref(false)
 
-// --- 위험 분석 관련 상태 ---
+// --- [핵심] 전체 분석 텍스트 저장소 ---
+const insightMap = ref({})
+
+// --- [핵심] 실시간 텍스트 계산 (Computed) ---
+const currentPeerInsight = computed(() => {
+  // 1. 데이터 로딩 전
+  if (!insightMap.value || Object.keys(insightMap.value).length === 0) {
+    return '분석 데이터를 불러오는 중입니다...';
+  }
+
+  // 2. 현재 선택된 "세부 지표(metric)"의 맵을 가져옴 (예: revGrowth)
+  // 데이터 구조: { revGrowth: { "228690": "...", "178434": "..." }, ... }
+  const metricInsights = insightMap.value[selectedDeepMetric.value];
+
+  // 3. 해당 지표에 대한 데이터가 아예 없으면 기본 문구
+  if (!metricInsights) return '해당 지표에 대한 AI 분석 내용이 없습니다.';
+
+  // 4. 현재 선택된 "경쟁사(Peer)"의 텍스트 가져옴
+  const peerIdStr = String(selectedPeerId.value);
+  const text = metricInsights[peerIdStr];
+
+  // 5. 텍스트가 있으면 리턴, 없으면 default 리턴 (없으면 "분석 내용 없음" 표시)
+  return text || metricInsights['default'] || '해당 기업과의 비교 분석 내용이 없습니다.';
+});
+
+// --- 위험/성장 분석 상태 ---
 const riskAnalysis = ref('')
 const riskLoading = ref(false)
-const riskError = ref('')
-
-// --- [신규] 성장성 분석 데이터 (API 연동, 없으면 목업 유지) ---
-const defaultGrowthAnalysis = {
-  overallSummary: "2024년 매출 급증으로 기술 상업화 초기에 진입했으나, 지속적인 영업손실과 자본잠식으로 재무 리스크가 상존함. 글로벌 이중항체 시장의 고성장 수혜 기대와 PSR 51.3배의 높은 밸류에이션 부담이 공존하는 상황.",
-  categories: [
-    { title: "수익화 구조 (Revenue Structure)", grade: "중", reason: "매출 275억 원 발생은 긍정적이나, 일시적 기술료 성격이 강하고 영업이익 적자 전환.", gradeColor: "text-amber-600 bg-amber-50" },
-    { title: "확장성 (Scalability)", grade: "상", reason: "글로벌 시장 연평균 18% 성장 및 정부 지원 정책으로 확장 잠재력 매우 높음.", gradeColor: "text-green-600 bg-green-50" },
-    { title: "구조적 리스크 (Structural Risk)", grade: "하", reason: "자본잠식 상태와 지속적인 현금 소진(Cash Burn)으로 재무 건전성 취약.", gradeColor: "text-red-600 bg-red-50" },
-    { title: "자원 확보 (Resource Investment)", grade: "중", reason: "400억 원 공모 자금은 단기 활용 가능하나, 글로벌 경쟁 대비 추가 조달 필요.", gradeColor: "text-amber-600 bg-amber-50" }
-  ]
-}
-const growthAnalysis = ref({ ...defaultGrowthAnalysis })
-
-// AI 분석 텍스트 파싱
-const analysisSections = computed(() => {
-  const text = (riskAnalysis.value || '').trim()
-  if (!text) {
-    return { summaryItems: [], judgmentText: '' }
-  }
-  const summaryMatch = text.match(/[\[【]핵심 투자 리스크 요약[\]】]\s*([\s\S]*?)(?=\n\s*[\[【]종합 판단[\]】]|$)/)
-  const judgmentMatch = text.match(/[\[【]종합 판단[\]】]\s*([\s\S]*)$/)
-
-  const summaryText = summaryMatch ? summaryMatch[1].trim() : ''
-  const judgmentText = judgmentMatch ? judgmentMatch[1].trim() : ''
-
-  const summaryItems = summaryText
-      .split(/\n\s*\d+\.\s*/)
-      .map(s => s.trim())
-      .filter(Boolean)
-
-  return {
-    summaryItems: summaryItems.map(item => {
-      const cleaned = formatArrowBreaks(item)
-      const parts = cleaned.split('\n')
-      const title = parts.shift() || ''
-      const body = parts.join('\n').trim()
-      return { title, body }
-    }),
-    judgmentText: formatArrowBreaks(judgmentText),
-  }
-})
-
-function formatArrowBreaks(text) {
-  if (!text) return ''
-  return text.replace(/^\s*\d+\.\s*/, '').replace(/\s*->\s*/g, '\n→ ')
-}
+const growthAnalysis = ref(null)
 
 // --- 차트 및 필터 상태 ---
 const performanceChartRef = ref(null)
@@ -74,12 +53,9 @@ let deepChartInst = null
 
 const selectedPerfMetric = ref('매출액')
 const selectedDeepCategory = ref('growth')
-const selectedDeepMetric = ref('')
+const selectedDeepMetric = ref('') // 예: 'revGrowth'
 const selectedPeerId = ref(null)
-const selectedValuationScenario = ref('standard')
 
-// [중요] vite.config.js의 proxy 설정을 사용하므로 상대 경로 '/api' 사용
-const API_BASE_URL = '/api'
 
 // --- 데이터 가져오기 ---
 const fetchCompanyDetail = async (targetId) => {
@@ -87,31 +63,34 @@ const fetchCompanyDetail = async (targetId) => {
     isLoading.value = true
     isError.value = false
 
-    const [response] = await Promise.all([
+    // [변경] 상세 정보와 분석 텍스트(Insights)를 병렬로 한 번에 조회
+    const [detailRes, insightRes] = await Promise.all([
       axios.get(`${API_BASE_URL}/upcoming-ipo/${targetId}/financials`),
-      new Promise(resolve => setTimeout(resolve, 1500))
+      axios.get(`${API_BASE_URL}/upcoming-ipo/${targetId}/analysis/insights`) // 전체 텍스트 API
     ])
 
-    company.value = response.data
+    company.value = detailRes.data
+    // [중요] 응답 구조에 맞춰 insights 저장 (JSON 최상위에 insights가 있다고 가정)
+    insightMap.value = insightRes.data.insights || {}
 
-    // [초기값 설정] compare 객체 사용
-    if (company.value && company.value.compare) {
+    // 초기값 설정 (기존 로직)
+    if (company.value?.compare) {
       const deepMetrics = company.value.compare.deepMetrics;
       const peers = company.value.compare.peers;
 
+      // 첫 번째 카테고리 -> 첫 번째 지표 선택
       if (deepMetrics?.[selectedDeepCategory.value]?.items?.length > 0) {
         selectedDeepMetric.value = deepMetrics[selectedDeepCategory.value].items[0].key
       }
+      // 첫 번째 경쟁사 선택
       if (peers?.length > 0) {
         selectedPeerId.value = peers[0].id
       }
     }
 
     await nextTick()
-    setTimeout(() => {
-      if (company.value?.financials) renderPerfChart()
-      if (company.value?.compare?.deepMetrics) renderDeepChart()
-    }, 50)
+    renderPerfChart()
+    renderDeepChart()
 
   } catch (error) {
     console.error('데이터 로드 실패:', error)
@@ -120,46 +99,26 @@ const fetchCompanyDetail = async (targetId) => {
     isLoading.value = false
   }
 
-  try {
-    riskLoading.value = true
-    riskError.value = ''
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const analysis = await getUpcomingIpoRiskAnalysis(targetId)
-    riskAnalysis.value = analysis?.analysisText || ''
-  } catch (error) {
-    console.error('위험 분석 로드 실패:', error)
-    riskError.value = ''
-    riskAnalysis.value = ''
-  } finally {
-    riskLoading.value = false
-  }
-
-  // Growth Potential Evaluation (business-analysis) 로드 — 있으면 채움, 없으면 목업 유지
-  growthAnalysis.value = { ...defaultGrowthAnalysis }
-  try {
-    const data = await getUpcomingIpoBusinessAnalysis(targetId)
-    if (data?.overallSummary != null || data?.categories?.length) {
-      growthAnalysis.value = {
-        overallSummary: data.overallSummary ?? '',
-        categories: (data.categories ?? []).map(c => ({
-          title: c.title ?? '',
-          grade: c.grade ?? '중',
-          reason: c.reason ?? '',
-          gradeColor: c.gradeColor ?? 'text-amber-600 bg-amber-50'
-        }))
-      }
-    }
-  } catch (error) {
-    if (error?.message?.includes('404')) {
-      growthAnalysis.value = { ...defaultGrowthAnalysis }
-    } else {
-      console.error('Growth Potential 분석 로드 실패:', error)
-      growthAnalysis.value = { ...defaultGrowthAnalysis }
-    }
-  }
+  // (Risk, Growth 등 추가 로딩 로직)
+  loadAdditionalAnalysis(targetId)
 }
 
-// --- [차트 1] 실적 추이 렌더링 ---
+const loadAdditionalAnalysis = async (targetId) => {
+  // Risk
+  try {
+    riskLoading.value = true
+    const analysis = await getUpcomingIpoRiskAnalysis(targetId)
+    riskAnalysis.value = analysis?.analysisText || ''
+  } catch(e) { console.error(e) } finally { riskLoading.value = false }
+
+  // Business
+  try {
+    const data = await getUpcomingIpoBusinessAnalysis(targetId)
+    growthAnalysis.value = data
+  } catch(e) {}
+}
+
+// --- 차트 렌더링 (Perf Chart) ---
 const renderPerfChart = () => {
   if (!performanceChartRef.value || !company.value?.financials) return
   if (perfChartInst) perfChartInst.dispose()
@@ -208,9 +167,9 @@ const renderPerfChart = () => {
   perfChartInst.setOption(option)
 }
 
-// --- [차트 2] 유사 기업 분석 렌더링 ---
+// --- 차트 렌더링 (Deep Chart) ---
 const renderDeepChart = () => {
-  if (!deepAnalysisChartRef.value || !company.value?.compare?.deepMetrics || !company.value?.compare?.peers) return
+  if (!deepAnalysisChartRef.value || !company.value?.compare?.deepMetrics) return
   if (deepChartInst) deepChartInst.dispose()
 
   deepChartInst = echarts.init(deepAnalysisChartRef.value)
@@ -225,39 +184,69 @@ const renderDeepChart = () => {
   const option = {
     tooltip: {trigger: 'axis'},
     legend: {bottom: 0, icon: 'circle'},
-    grid: {top: '10%', left: '5%', right: '5%', bottom: '15%', containLabel: true},
-    xAxis: {type: 'category', data: ['22년', '23년', '24년', '25년(3Q)'], axisLine: {show: false}, axisTick: {show: false}},
+    grid: {top: '15%', left: '3%', right: '4%', bottom: '15%', containLabel: true},
+    xAxis: {type: 'category', data: ['22년', '23년', '24년', '25년(3Q)'], axisTick: {show:false}, axisLine: {show:false}},
     yAxis: {type: 'value', splitLine: {lineStyle: {color: '#F2F4F6'}}},
     series: [
       {
         name: company.value.basic.name,
         type: 'line',
         data: metricData.target,
-        symbol: 'circle', symbolSize: 6,
-        itemStyle: {color: '#3182F6'},
-        lineStyle: {width: 3}
+        symbol: 'circle', symbolSize: 8,
+        itemStyle: {color: '#3182F6'}, lineStyle: {width: 3}
       },
       {
         name: peerName,
         type: 'line',
         data: metricData.peers?.[peerId] || [],
-        symbol: 'circle', symbolSize: 6,
-        itemStyle: {color: '#EF4444'},
-        lineStyle: {width: 3}
+        symbol: 'circle', symbolSize: 8,
+        itemStyle: {color: '#EF4444'}, lineStyle: {width: 3}
       },
       {
         name: '업계평균',
         type: 'line',
         data: metricData.avg || [],
         symbol: 'none',
-        itemStyle: {color: '#B0B8C1'},
-        lineStyle: {type: 'dashed'}
+        itemStyle: {color: '#B0B8C1'}, lineStyle: {type: 'dashed', width: 2}
       }
     ]
   }
   deepChartInst.setOption(option)
 }
 
+// --- AI 분석 텍스트 파싱 (Risk Analysis용) ---
+const analysisSections = computed(() => {
+  const text = (riskAnalysis.value || '').trim()
+  if (!text) {
+    return { summaryItems: [], judgmentText: '' }
+  }
+  const summaryMatch = text.match(/[\[【]핵심 투자 리스크 요약[\]】]\s*([\s\S]*?)(?=\n\s*[\[【]종합 판단[\]】]|$)/)
+  const judgmentMatch = text.match(/[\[【]종합 판단[\]】]\s*([\s\S]*)$/)
+
+  const summaryText = summaryMatch ? summaryMatch[1].trim() : ''
+  const judgmentText = judgmentMatch ? judgmentMatch[1].trim() : ''
+
+  const summaryItems = summaryText
+      .split(/\n\s*\d+\.\s*/)
+      .map(s => s.trim())
+      .filter(Boolean)
+
+  return {
+    summaryItems: summaryItems.map(item => {
+      const cleaned = formatArrowBreaks(item)
+      const parts = cleaned.split('\n')
+      const title = parts.shift() || ''
+      const body = parts.join('\n').trim()
+      return { title, body }
+    }),
+    judgmentText: formatArrowBreaks(judgmentText),
+  }
+})
+
+function formatArrowBreaks(text) {
+  if (!text) return ''
+  return text.replace(/^\s*\d+\.\s*/, '').replace(/\s*->\s*/g, '\n→ ')
+}
 // --- 유틸리티 ---
 const getRiskLevelInfo = (grade) => {
   const maps = {
@@ -268,35 +257,37 @@ const getRiskLevelInfo = (grade) => {
   return maps[grade] || maps['CAUTION']
 }
 
-// --- 생명주기 ---
-onMounted(() => {
-  fetchCompanyDetail(id)
-  window.addEventListener('resize', () => {
-    perfChartInst?.resize();
-    deepChartInst?.resize()
-  })
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', () => {
-  })
-})
-
 // --- Watchers ---
 watch(selectedPerfMetric, renderPerfChart)
 
 watch(selectedDeepCategory, (newVal) => {
   if (company.value?.compare?.deepMetrics) {
+    // 카테고리 바꾸면 해당 카테고리의 첫 번째 세부 지표로 자동 변경
     selectedDeepMetric.value = company.value.compare.deepMetrics[newVal].items[0].key
   }
 })
 
-watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChart)
+watch(isLoading, async (loading) => {
+  if (!loading && company.value) { // 로딩이 끝났고 데이터가 있다면
+    await nextTick() // v-if가 전환되어 DOM이 생성될 때까지 대기
+    renderPerfChart()
+    renderDeepChart()
+  }
+})
+
+watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], () => {
+  renderDeepChart();
+  // API 호출 필요 없음! computed가 알아서 텍스트 바꿈
+})
+
+onMounted(() => {
+  fetchCompanyDetail(id)
+  window.addEventListener('resize', () => { perfChartInst?.resize(); deepChartInst?.resize() })
+})
 </script>
 
 <template>
   <div class="min-h-screen bg-[#F2F4F6] pb-24 font-sans text-[#333D4B]">
-
     <div v-if="isLoading" class="flex flex-col items-center justify-center min-h-screen">
       <div class="animate-spin h-8 w-8 border-4 border-[#3182F6] border-t-transparent rounded-full mb-4"></div>
       <p class="text-[#8B95A1] font-medium animate-pulse">AI Analyst가 기업 데이터를 분석 중입니다...</p>
@@ -331,7 +322,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
 
       <main class="max-w-2xl mx-auto px-5 py-6 space-y-5">
 
-        <section class="bg-white rounded-[24px] p-6 shadow-sm">
+        <section v-if="growthAnalysis" class="bg-white rounded-[24px] p-6 shadow-sm">
           <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
             <div class="flex items-center gap-2 mb-2">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-[#3182F6]" fill="none" viewBox="0 0 24 24"
@@ -440,49 +431,6 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           <div ref="performanceChartRef" style="width: 100%; height: 250px;"></div>
         </section>
 
-        <section class="bg-white rounded-[24px] p-6 shadow-sm">
-          <h2 class="text-[19px] font-bold mb-6">
-            <span class="text-[#3182F6]">AI</span> 추천 유사 기업
-          </h2>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div
-                v-for="(peer, idx) in company.compare.peers.slice(0, 3)"
-                :key="peer.id"
-                class="relative bg-[#F9FAFB] rounded-2xl p-5 border border-[#EEF2F6] text-center hover:shadow-md transition"
-            >
-              <!-- Rank Badge -->
-              <div
-                  class="absolute top-4 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center font-bold text-[14px]"
-                  :class="idx === 0
-          ? 'bg-blue-100 text-[#3182F6]'
-          : idx === 1
-          ? 'bg-gray-100 text-[#6B7684]'
-          : 'bg-amber-100 text-amber-600'"
-              >
-                {{ String.fromCharCode(65 + idx) }}
-              </div>
-
-              <div class="pt-10">
-                <h3 class="font-bold text-[16px] mb-1 text-[#191F28]">
-                  {{ peer.name }}
-                </h3>
-
-                <div class="flex justify-center gap-6 text-[13px]">
-                  <div>
-                    <p class="text-[#8B95A1] mb-1">PER</p>
-                    <p class="font-bold text-[#333D4B]">{{ peer.per }}</p>
-                  </div>
-                  <div>
-                    <p class="text-[#8B95A1] mb-1">PBR</p>
-                    <p class="font-bold text-[#333D4B]">{{ peer.pbr }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section v-if="company.compare?.deepMetrics" class="bg-white rounded-[24px] p-6 shadow-sm">
           <h2 class="text-[19px] font-bold mb-5">유사 기업 분석</h2>
 
@@ -504,48 +452,39 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
 
           <div class="flex justify-end mb-2">
-            <select v-model="selectedPeerId"
-                    class="bg-[#F2F4F6] border-none text-[12px] font-bold rounded-lg px-2 py-1 outline-none text-[#333D4B]">
-              <option v-for="p in company.compare.peers" :key="p.id" :value="p.id">{{ p.name }}</option>
-            </select>
+            <div class="relative">
+              <select v-model="selectedPeerId"
+                      class="appearance-none bg-[#F2F4F6] border-none text-[12px] font-bold rounded-lg pl-3 pr-8 py-1.5 outline-none text-[#333D4B] cursor-pointer focus:ring-2 focus:ring-blue-100">
+                <option v-for="p in company.compare.peers" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </div>
+            </div>
           </div>
 
           <div ref="deepAnalysisChartRef" style="width: 100%; height: 300px;"></div>
-        </section>
 
-        <section v-if="company.valuation" class="bg-white rounded-[24px] p-6 shadow-sm">
-          <h2 class="text-[19px] font-bold mb-5">적정 주가 산출</h2>
-
-          <div class="flex bg-[#F2F4F6] p-1 rounded-xl mb-6">
-            <button v-for="(scen, key) in company.valuation" :key="key"
-                    @click="selectedValuationScenario = key"
-                    class="flex-1 py-2 rounded-lg text-[13px] font-bold"
-                    :class="selectedValuationScenario === key ? 'bg-white shadow-sm text-[#3182F6]' : 'text-[#8B95A1]'">
-              {{ key === 'conservative' ? '보수적' : key === 'standard' ? '시장표준' : '공격적' }}
-            </button>
-          </div>
-
-          <div class="space-y-4">
-            <div>
-              <h3 class="font-bold text-[#191F28]">{{ company.valuation[selectedValuationScenario].modelName }}</h3>
-              <p class="text-[13px] text-[#6B7684] mt-1 break-keep">
-                {{ company.valuation[selectedValuationScenario].desc }}
-              </p>
-            </div>
-            <div class="flex items-baseline gap-2">
-              <span class="text-[32px] font-bold text-[#333D4B]">
-                {{ company.valuation[selectedValuationScenario].price }}
-              </span>
-              <span class="text-[15px] font-bold"
-                    :class="company.valuation[selectedValuationScenario].gap.includes('+') ? 'text-[#EF4444]' : 'text-[#3182F6]'">
-                {{ company.valuation[selectedValuationScenario].gap }}
-              </span>
-            </div>
-            <div class="bg-[#F9FAFB] p-4 rounded-xl border border-gray-100">
-              <p class="text-[11px] text-[#8B95A1] mb-2 uppercase font-bold">Formula</p>
-              <p class="text-[13px] font-mono font-medium text-center py-3 bg-white rounded-lg border border-[#E5E8EB] text-[#333D4B]">
-                {{ company.valuation[selectedValuationScenario].formula }}
-              </p>
+          <div class="mt-5 bg-blue-50/50 rounded-xl p-4 border border-blue-100/50 transition-all duration-300">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5 w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
+                <span class="text-[14px]">🤖</span>
+              </div>
+              <div>
+                <h4 class="text-[13px] font-bold text-gray-800 mb-1 flex items-center gap-1.5">
+                  AI Insight
+                  <span class="text-[11px] text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                     {{ company.compare.deepMetrics[selectedDeepCategory].items.find(i => i.key === selectedDeepMetric)?.name }}
+                  </span>
+                  <span class="text-[10px] text-gray-400">vs</span>
+                  <span class="text-[11px] text-blue-600 bg-white px-1.5 py-0.5 rounded border border-blue-100 font-medium">
+                     {{ company.compare.peers.find(p => p.id === selectedPeerId)?.name || '유사기업' }}
+                  </span>
+                </h4>
+                <p class="text-[13px] text-gray-600 leading-relaxed break-keep whitespace-pre-line">
+                  {{ currentPeerInsight }}
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -565,32 +504,6 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
             </span>
             핵심 투자 위험 분석
           </h2>
-
-          <div v-if="company.riskReport" class="bg-gray-50 rounded-[20px] p-5 mb-5 border border-gray-100">
-            <div class="flex justify-between items-start mb-4">
-              <div>
-                <p class="text-[13px] text-[#8B95A1] mb-1">AI 리스크 종합 진단</p>
-                <div class="flex items-center gap-2">
-                  <h3 class="text-[22px] font-bold" :class="getRiskLevelInfo(company.riskReport.grade).color">
-                    {{ getRiskLevelInfo(company.riskReport.grade).label }} 단계
-                  </h3>
-                  <span class="text-[12px] px-2 py-1 rounded-full font-medium"
-                        :class="[getRiskLevelInfo(company.riskReport.grade).bg, getRiskLevelInfo(company.riskReport.grade).color]">
-                    Score {{ company.riskReport.score }}
-                  </span>
-                </div>
-              </div>
-              <div class="flex gap-1.5 bg-white p-1.5 rounded-full shadow-sm border border-gray-100">
-                <span class="text-3xl filter drop-shadow-sm">{{
-                    getRiskLevelInfo(company.riskReport.grade).icon
-                  }}</span>
-              </div>
-            </div>
-
-            <p class="text-[13px] text-[#4E5968] leading-snug">
-              {{ getRiskLevelInfo(company.riskReport.grade).desc }}
-            </p>
-          </div>
 
           <div class="mb-6">
             <div class="flex items-center justify-between mb-3">
@@ -667,14 +580,6 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
                   </div>
                 </template>
               </div>
-            </div>
-          </div>
-
-          <div v-if="company.riskReport?.aiSummary" class="space-y-3">
-            <div v-for="(s, i) in company.riskReport.aiSummary" :key="i"
-                 class="flex gap-3 items-start bg-white p-3 rounded-xl border border-[#F2F4F6]">
-              <span class="text-[#3182F6] font-bold text-lg leading-none mt-0.5">Q.</span>
-              <p class="text-[14px] leading-relaxed text-[#4E5968]">{{ s }}</p>
             </div>
           </div>
         </section>
