@@ -21,7 +21,8 @@ let observer = null        // IntersectionObserver 인스턴스
 // 검색어 상태
 const searchQuery = ref('')
 
-const API_BASE_URL = 'http://localhost:8080/api'
+// const API_BASE_URL = 'http://localhost:8080/api'
+const API_BASE_URL = '/api'
 
 const fetchIpoList = async () => {
   // 1. 이미 로딩 중이거나, 마지막 페이지에 도달했다면 요청하지 않음 (방어 코드)

@@ -1,30 +1,62 @@
 <script setup>
-import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import {ref, onMounted, watch, nextTick, computed, onUnmounted} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
 import * as echarts from 'echarts'
 import axios from 'axios'
 // API 경로 확인 필요
-import { getUpcomingIpoRiskAnalysis } from '../api'
+import {getUpcomingIpoRiskAnalysis} from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id
 
 // --- 상태 관리 ---
-const company = ref(null)         // 기업 상세 데이터 (기본 정보, 재무 등)
+const company = ref(null)         // 기업 상세 데이터
 const isLoading = ref(true)       // 로딩 상태
 const isError = ref(false)
 
-// --- 위험 분석 관련 상태 (별도 API) ---
+// --- 위험 분석 관련 상태 ---
 const riskAnalysis = ref('')
 const riskLoading = ref(false)
 const riskError = ref('')
 
-// AI 분석 텍스트 파싱 (Markdown -> 구조화된 데이터)
+// --- [신규] 성장성 분석 데이터 (추후 API 연동 시 교체) ---
+const growthAnalysis = ref({
+  overallSummary: "2024년 매출 급증으로 기술 상업화 초기에 진입했으나, 지속적인 영업손실과 자본잠식으로 재무 리스크가 상존함. 글로벌 이중항체 시장의 고성장 수혜 기대와 PSR 51.3배의 높은 밸류에이션 부담이 공존하는 상황.",
+  categories: [
+    {
+      title: "수익화 구조 (Revenue Structure)",
+      grade: "중",
+      reason: "매출 275억 원 발생은 긍정적이나, 일시적 기술료 성격이 강하고 영업이익 적자 전환.",
+      gradeColor: "text-amber-600 bg-amber-50"
+    },
+    {
+      title: "확장성 (Scalability)",
+      grade: "상",
+      reason: "글로벌 시장 연평균 18% 성장 및 정부 지원 정책으로 확장 잠재력 매우 높음.",
+      gradeColor: "text-green-600 bg-green-50"
+    },
+    {
+      title: "구조적 리스크 (Structural Risk)",
+      grade: "하",
+      reason: "자본잠식 상태와 지속적인 현금 소진(Cash Burn)으로 재무 건전성 취약.",
+      gradeColor: "text-red-600 bg-red-50"
+    },
+    {
+      title: "자원 확보 (Resource Investment)",
+      grade: "중",
+      reason: "400억 원 공모 자금은 단기 활용 가능하나, 글로벌 경쟁 대비 추가 조달 필요.",
+      gradeColor: "text-amber-600 bg-amber-50"
+    }
+  ]
+})
+
+
+// AI 분석 텍스트 파싱
 const analysisSections = computed(() => {
   const text = (riskAnalysis.value || '').trim()
   if (!text) {
-    return { summaryItems: [], judgmentText: '' }
+    return {summaryItems: [], judgmentText: ''}
   }
   const summaryMatch = text.match(/[\[【]핵심 투자 리스크 요약[\]】]\s*([\s\S]*?)(?=\n\s*[\[【]종합 판단[\]】]|$)/)
   const judgmentMatch = text.match(/[\[【]종합 판단[\]】]\s*([\s\S]*)$/)
@@ -43,7 +75,7 @@ const analysisSections = computed(() => {
       const parts = cleaned.split('\n')
       const title = parts.shift() || ''
       const body = parts.join('\n').trim()
-      return { title, body }
+      return {title, body}
     }),
     judgmentText: formatArrowBreaks(judgmentText),
   }
@@ -68,11 +100,11 @@ const selectedDeepMetric = ref('')
 const selectedPeerId = ref(null)
 const selectedValuationScenario = ref('standard')
 
-const API_BASE_URL = 'http://localhost:8080/api'
+// const API_BASE_URL = 'http://localhost:8080/api'
+const API_BASE_URL = '/api'
 
 // --- 데이터 가져오기 ---
 const fetchCompanyDetail = async (targetId) => {
-  // 1. 기업 상세 정보 로드 (재무, 기본정보)
   try {
     isLoading.value = true
     isError.value = false
@@ -89,7 +121,6 @@ const fetchCompanyDetail = async (targetId) => {
       }
     }
 
-    // DOM 생성 대기 후 차트 렌더링
     await nextTick()
     setTimeout(() => {
       if (company.value?.financials) renderPerfChart()
@@ -103,7 +134,6 @@ const fetchCompanyDetail = async (targetId) => {
     isLoading.value = false
   }
 
-  // 2. 위험 분석 데이터 로드 (별도 API)
   try {
     riskLoading.value = true
     riskError.value = ''
@@ -137,7 +167,6 @@ const renderPerfChart = () => {
       formatter: (params) => {
         const item = params[0];
         const val = item.value;
-        // [핵심 수정] item.color를 사용하여 현재 막대 색상(파랑/빨강)을 그대로 가져옴
         const color = item.color;
 
         return `${item.name}<br/>
@@ -153,18 +182,17 @@ const renderPerfChart = () => {
       axisLine: {show: true, lineStyle: {color: '#E5E8EB'}, onZero: true},
       axisLabel: {color: '#6B7684', fontSize: 11, margin: 15}
     },
-    yAxis: { show: false, type: 'value', scale: true },
+    yAxis: {show: false, type: 'value', scale: true},
     series: [{
       name: selectedPerfMetric.value,
       type: 'bar',
       data: data,
       barWidth: 20,
       itemStyle: {
-        // 양수: 파랑(#3182F6), 음수: 빨강(#EF4444)
         color: (p) => p.value >= 0 ? '#3182F6' : '#EF4444',
         borderRadius: [4, 4, 4, 4]
       },
-      label: { show: false }
+      label: {show: false}
     }]
   }
   perfChartInst.setOption(option)
@@ -240,7 +268,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', () => {})
+  window.removeEventListener('resize', () => {
+  })
 })
 
 // --- Watchers ---
@@ -279,7 +308,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
             </svg>
           </button>
           <router-link to="/" class="shrink-0">
-            <img src="/ipo_check_logo.png" alt="IPO CHECK" class="h-6 object-contain" />
+            <img src="/ipo_check_logo.png" alt="IPO CHECK" class="h-6 object-contain"/>
           </router-link>
           <h1 class="text-[18px] font-bold flex items-center gap-2 min-w-0 flex-1 truncate">
             {{ company.basic?.name }}
@@ -291,6 +320,36 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
       </header>
 
       <main class="max-w-2xl mx-auto px-5 py-6 space-y-5">
+
+        <section class="bg-white rounded-[24px] p-6 shadow-sm">
+          <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
+            <div class="flex items-center gap-2 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-[#3182F6]" fill="none" viewBox="0 0 24 24"
+                   stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <h2 class="text-[16px] font-bold text-[#191F28]">AI Analyst Growth Potential Evaluation</h2>
+            </div>
+            <p class="text-[14px] text-[#333D4B] leading-relaxed break-keep">
+              {{ growthAnalysis.overallSummary }}
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div v-for="(item, index) in growthAnalysis.categories" :key="index"
+                 class="border border-[#F2F4F6] rounded-xl p-4 hover:shadow-sm transition-shadow">
+              <div class="flex justify-between items-center mb-2">
+                <h3 class="text-[14px] font-bold text-[#333D4B]">{{ item.title }}</h3>
+                <span class="text-[11px] font-bold px-2 py-0.5 rounded-md" :class="item.gradeColor">
+                  {{ item.grade }}
+                </span>
+              </div>
+              <p class="text-[13px] text-[#4E5968] leading-snug break-keep">
+                {{ item.reason }}
+              </p>
+            </div>
+          </div>
+        </section>
 
         <section v-if="company.basic" class="bg-white rounded-[24px] p-6 shadow-sm">
           <h2 class="text-[19px] font-bold mb-5">핵심 정보</h2>
@@ -438,8 +497,10 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
         </section>
 
-        <section v-if="company.riskReport || riskLoading || riskAnalysis" class="bg-white rounded-[24px] p-6 shadow-sm mb-10 overflow-hidden relative">
-          <div class="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+        <section v-if="company.riskReport || riskLoading || riskAnalysis"
+                 class="bg-white rounded-[24px] p-6 shadow-sm mb-10 overflow-hidden relative">
+          <div
+              class="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
 
           <h2 class="text-[19px] font-bold text-[#191F28] mb-6 flex items-center gap-2 relative z-10">
             <span class="bg-blue-100 p-1.5 rounded-lg">
