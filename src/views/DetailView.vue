@@ -468,10 +468,6 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
                   {{ peer.name }}
                 </h3>
 
-                <p class="text-[12px] text-[#8B95A1] mb-4">
-                  시가총액 {{ peer.marketCap }}
-                </p>
-
                 <div class="flex justify-center gap-6 text-[13px]">
                   <div>
                     <p class="text-[#8B95A1] mb-1">PER</p>
