@@ -81,36 +81,36 @@ const selectedValuationScenario = ref('standard')
 // [중요] vite.config.js의 proxy 설정을 사용하므로 상대 경로 '/api' 사용
 const API_BASE_URL = '/api'
 
-// --- 데이터 가져오기 (2.5초 지연 적용) ---
+// --- 데이터 가져오기 ---
 const fetchCompanyDetail = async (targetId) => {
   try {
     isLoading.value = true
     isError.value = false
 
-    // [핵심 로직] API 요청과 2.5초 타이머를 동시에 실행 (Promise.all)
-    // 데이터가 0.1초 만에 와도 2.5초를 기다리고, 3초 걸리면 3초 기다림.
     const [response] = await Promise.all([
       axios.get(`${API_BASE_URL}/upcoming-ipo/${targetId}/financials`),
-      new Promise(resolve => setTimeout(resolve, 2500)) // ⏳ 최소 2.5초 대기
+      new Promise(resolve => setTimeout(resolve, 1500))
     ])
 
     company.value = response.data
 
-    // 초기값 설정
-    if (company.value) {
-      if (company.value.deepMetrics?.[selectedDeepCategory.value]?.items?.length > 0) {
-        selectedDeepMetric.value = company.value.deepMetrics[selectedDeepCategory.value].items[0].key
+    // [초기값 설정] compare 객체 사용
+    if (company.value && company.value.compare) {
+      const deepMetrics = company.value.compare.deepMetrics;
+      const peers = company.value.compare.peers;
+
+      if (deepMetrics?.[selectedDeepCategory.value]?.items?.length > 0) {
+        selectedDeepMetric.value = deepMetrics[selectedDeepCategory.value].items[0].key
       }
-      if (company.value.peers?.length > 0) {
-        selectedPeerId.value = company.value.peers[0].id
+      if (peers?.length > 0) {
+        selectedPeerId.value = peers[0].id
       }
     }
 
-    // DOM 렌더링 후 차트 그리기
     await nextTick()
     setTimeout(() => {
       if (company.value?.financials) renderPerfChart()
-      if (company.value?.deepMetrics) renderDeepChart()
+      if (company.value?.compare?.deepMetrics) renderDeepChart()
     }, 50)
 
   } catch (error) {
@@ -120,18 +120,15 @@ const fetchCompanyDetail = async (targetId) => {
     isLoading.value = false
   }
 
-  // 위험 분석 데이터 로드 (페이지 로드 후 별도로 진행)
   try {
     riskLoading.value = true
     riskError.value = ''
-    // 여기도 살짝 지연을 주면 "순차적 분석" 느낌이 남 (선택 사항, 현재 1초)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
+    await new Promise(resolve => setTimeout(resolve, 500));
     const analysis = await getUpcomingIpoRiskAnalysis(targetId)
     riskAnalysis.value = analysis?.analysisText || ''
   } catch (error) {
     console.error('위험 분석 로드 실패:', error)
-    riskError.value = '위험 분석 데이터를 불러오지 못했습니다.'
+    riskError.value = ''
     riskAnalysis.value = ''
   } finally {
     riskLoading.value = false
@@ -213,23 +210,23 @@ const renderPerfChart = () => {
 
 // --- [차트 2] 유사 기업 분석 렌더링 ---
 const renderDeepChart = () => {
-  if (!deepAnalysisChartRef.value || !company.value?.deepMetrics || !company.value?.peers) return
+  if (!deepAnalysisChartRef.value || !company.value?.compare?.deepMetrics || !company.value?.compare?.peers) return
   if (deepChartInst) deepChartInst.dispose()
 
   deepChartInst = echarts.init(deepAnalysisChartRef.value)
-  const category = company.value.deepMetrics[selectedDeepCategory.value]
 
+  const category = company.value.compare.deepMetrics[selectedDeepCategory.value]
   if (!category || !category.data[selectedDeepMetric.value]) return
 
   const metricData = category.data[selectedDeepMetric.value]
   const peerId = selectedPeerId.value
-  const peerName = company.value.peers.find(p => p.id === peerId)?.name || '경쟁사'
+  const peerName = company.value.compare.peers.find(p => p.id === peerId)?.name || '경쟁사'
 
   const option = {
     tooltip: {trigger: 'axis'},
     legend: {bottom: 0, icon: 'circle'},
     grid: {top: '10%', left: '5%', right: '5%', bottom: '15%', containLabel: true},
-    xAxis: {type: 'category', data: ['23년', '24년', '25년(E)'], axisLine: {show: false}, axisTick: {show: false}},
+    xAxis: {type: 'category', data: ['22년', '23년', '24년', '25년(3Q)'], axisLine: {show: false}, axisTick: {show: false}},
     yAxis: {type: 'value', splitLine: {lineStyle: {color: '#F2F4F6'}}},
     series: [
       {
@@ -287,11 +284,13 @@ onUnmounted(() => {
 
 // --- Watchers ---
 watch(selectedPerfMetric, renderPerfChart)
+
 watch(selectedDeepCategory, (newVal) => {
-  if (company.value?.deepMetrics) {
-    selectedDeepMetric.value = company.value.deepMetrics[newVal].items[0].key
+  if (company.value?.compare?.deepMetrics) {
+    selectedDeepMetric.value = company.value.compare.deepMetrics[newVal].items[0].key
   }
 })
+
 watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChart)
 </script>
 
@@ -441,11 +440,58 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           <div ref="performanceChartRef" style="width: 100%; height: 250px;"></div>
         </section>
 
-        <section v-if="company.deepMetrics" class="bg-white rounded-[24px] p-6 shadow-sm">
+        <section class="bg-white rounded-[24px] p-6 shadow-sm">
+          <h2 class="text-[19px] font-bold mb-6">
+            <span class="text-[#3182F6]">AI</span> 추천 유사 기업
+          </h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div
+                v-for="(peer, idx) in company.compare.peers.slice(0, 3)"
+                :key="peer.id"
+                class="relative bg-[#F9FAFB] rounded-2xl p-5 border border-[#EEF2F6] text-center hover:shadow-md transition"
+            >
+              <!-- Rank Badge -->
+              <div
+                  class="absolute top-4 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center font-bold text-[14px]"
+                  :class="idx === 0
+          ? 'bg-blue-100 text-[#3182F6]'
+          : idx === 1
+          ? 'bg-gray-100 text-[#6B7684]'
+          : 'bg-amber-100 text-amber-600'"
+              >
+                {{ String.fromCharCode(65 + idx) }}
+              </div>
+
+              <div class="pt-10">
+                <h3 class="font-bold text-[16px] mb-1 text-[#191F28]">
+                  {{ peer.name }}
+                </h3>
+
+                <p class="text-[12px] text-[#8B95A1] mb-4">
+                  시가총액 {{ peer.marketCap }}
+                </p>
+
+                <div class="flex justify-center gap-6 text-[13px]">
+                  <div>
+                    <p class="text-[#8B95A1] mb-1">PER</p>
+                    <p class="font-bold text-[#333D4B]">{{ peer.per }}</p>
+                  </div>
+                  <div>
+                    <p class="text-[#8B95A1] mb-1">PBR</p>
+                    <p class="font-bold text-[#333D4B]">{{ peer.pbr }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="company.compare?.deepMetrics" class="bg-white rounded-[24px] p-6 shadow-sm">
           <h2 class="text-[19px] font-bold mb-5">유사 기업 분석</h2>
 
           <div class="flex border-b mb-5">
-            <button v-for="(cat, key) in company.deepMetrics" :key="key" @click="selectedDeepCategory = key"
+            <button v-for="(cat, key) in company.compare.deepMetrics" :key="key" @click="selectedDeepCategory = key"
                     class="flex-1 pb-3 text-[15px] font-bold border-b-2 transition-colors"
                     :class="selectedDeepCategory === key ? 'border-[#333D4B] text-[#333D4B]' : 'border-transparent text-[#B0B8C1]'">
               {{ cat.label }}
@@ -453,7 +499,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           </div>
 
           <div class="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
-            <button v-for="item in company.deepMetrics[selectedDeepCategory].items" :key="item.key"
+            <button v-for="item in company.compare.deepMetrics[selectedDeepCategory].items" :key="item.key"
                     @click="selectedDeepMetric = item.key"
                     class="px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap transition-colors"
                     :class="selectedDeepMetric === item.key ? 'bg-[#3182F6] text-white' : 'bg-[#F2F4F6] text-[#6B7684]'">
@@ -464,7 +510,7 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
           <div class="flex justify-end mb-2">
             <select v-model="selectedPeerId"
                     class="bg-[#F2F4F6] border-none text-[12px] font-bold rounded-lg px-2 py-1 outline-none text-[#333D4B]">
-              <option v-for="p in company.peers" :key="p.id" :value="p.id">{{ p.name }}</option>
+              <option v-for="p in company.compare.peers" :key="p.id" :value="p.id">{{ p.name }}</option>
             </select>
           </div>
 
