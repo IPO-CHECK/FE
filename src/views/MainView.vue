@@ -113,15 +113,9 @@ async function loadUpcomingFromDb() {
     <header class="bg-white sticky top-0 z-10 border-b border-gray-100">
       <div class="max-w-2xl mx-auto px-5 pt-5 pb-4">
         <div class="flex items-center gap-1.5 mb-4">
-          <div class="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center text-white">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24"
-                 stroke="currentColor" stroke-width="3">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-            </svg>
-          </div>
-          <span class="text-xl font-black tracking-tight text-gray-900 font-sans">
-            IPO <span class="text-blue-600">CHECK</span>
-          </span>
+          <router-link to="/" class="cursor-pointer">
+            <img src="/ipo_check_logo.png" alt="IPO CHECK" class="h-7 object-contain" />
+          </router-link>
         </div>
 
         <div>

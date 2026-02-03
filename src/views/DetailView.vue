@@ -273,12 +273,15 @@ watch([selectedDeepCategory, selectedDeepMetric, selectedPeerId], renderDeepChar
     <div v-else-if="company">
       <header class="bg-white/90 sticky top-0 z-20 border-b border-[#F2F4F6] backdrop-blur-md">
         <div class="max-w-2xl mx-auto px-5 py-3 flex items-center gap-3">
-          <button @click="router.back()" class="p-2 -ml-2 hover:bg-gray-100 rounded-full">
+          <button @click="router.back()" class="p-2 -ml-2 hover:bg-gray-100 rounded-full shrink-0">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path d="M15 19l-7-7 7-7"/>
             </svg>
           </button>
-          <h1 class="text-[18px] font-bold flex items-center gap-2">
+          <router-link to="/" class="shrink-0">
+            <img src="/ipo_check_logo.png" alt="IPO CHECK" class="h-6 object-contain" />
+          </router-link>
+          <h1 class="text-[18px] font-bold flex items-center gap-2 min-w-0 flex-1 truncate">
             {{ company.basic?.name }}
             <span class="text-[11px] font-medium text-[#8B95A1] bg-[#F2F4F6] px-1.5 py-0.5 rounded-md">
               {{ company.basic?.code }}
